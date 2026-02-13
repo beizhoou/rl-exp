@@ -107,12 +107,25 @@ class RollingTrainer:
         state = env.reset()
         done = False
         metrics = []
-        
+
         while not done:
             action = agent.select_action(state, deterministic=True)
             state, reward, done, info = env.step(action)
-            metrics.append(info)
-        
+            # 只添加非空的info（过滤边界情况）
+            if info:
+                metrics.append(info)
+
+        # 如果没有有效的metrics，返回空结果
+        if not metrics:
+            return {
+                'sharpe': 0,
+                'total_return_pct': 0,
+                'max_drawdown': 0,
+                'turnover_mean': 0,
+                'win_rate': 0,
+                'metrics_history': []
+            }
+
         # 计算评估指标
         returns = [m['daily_return'] for m in metrics]
         values = [m['portfolio_value'] for m in metrics]

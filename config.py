@@ -38,7 +38,7 @@ class DataConfig:
     
     # 时间范围（实际数据范围：2019.01.01 - 2025.12.31）
     train_months: int = 12
-    test_months: int = 1
+    test_months: int = 3  # 增加到3个月以确保有足够测试数据
     start_date: str = "2019-01-01"
     end_date: str = "2025-12-31"
     

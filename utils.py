@@ -121,33 +121,40 @@ class Visualizer:
     """可视化"""
     def __init__(self, save_dir: str):
         self.save_dir = save_dir
-        
+
     def plot_training_report(self, metrics_history: List[Dict], window_id: int):
+        # 如果没有有效数据，跳过绘图
+        if not metrics_history:
+            print(f"Warning: No valid metrics for window {window_id}, skipping plot")
+            return
+
         fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-        
+
         dates = range(len(metrics_history))
         values = [m['portfolio_value'] for m in metrics_history]
-        
+
         axes[0,0].plot(dates, values, label='Portfolio')
         axes[0,0].set_title('Cumulative Return')
         axes[0,0].grid(True, alpha=0.3)
-        
+
         returns = [m['daily_return'] for m in metrics_history]
         rolling_sharpe = pd.Series(returns).rolling(30).mean() / \
                         (pd.Series(returns).rolling(30).std() + 1e-8) * np.sqrt(252)
         axes[0,1].plot(dates, rolling_sharpe, color='green')
         axes[0,1].set_title('Rolling Sharpe')
         axes[0,1].grid(True, alpha=0.3)
-        
+
         cummax = np.maximum.accumulate(values)
         drawdown = (cummax - values) / cummax
         axes[1,0].fill_between(dates, -drawdown*100, 0, color='red', alpha=0.3)
-        axes[1,0].set_title(f'Max DD: {max(drawdown):.2%}')
-        
+        max_dd = max(drawdown) if len(drawdown) > 0 else 0
+        axes[1,0].set_title(f'Max DD: {max_dd:.2%}')
+
         turnovers = [m.get('turnover', 0) for m in metrics_history]
-        axes[1,1].hist(turnovers, bins=30, alpha=0.7)
+        if turnovers:
+            axes[1,1].hist(turnovers, bins=30, alpha=0.7)
         axes[1,1].set_title(f'Turnover Mean: {np.mean(turnovers):.2%}')
-        
+
         plt.tight_layout()
         plt.savefig(f'{self.save_dir}/train_win{window_id}.png', dpi=150)
         plt.close()

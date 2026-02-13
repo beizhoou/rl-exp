@@ -325,8 +325,9 @@ class PortfolioTradingEnv(gym.Env):
     
     def reset(self) -> np.ndarray:
         """重置环境"""
-        # 确保 current_step 不超过数据长度
-        self.current_step = min(self.lookback, len(self.dates) - 1)
+        # 确保 current_step 不超过数据长度，并至少保留1步用于评估
+        max_valid_step = max(0, len(self.dates) - 2)  # 确保至少有1步可以step
+        self.current_step = min(self.lookback, max_valid_step)
         if self.current_step < 0:
             self.current_step = 0
         self.prev_weights = np.ones(self.n_stocks) / self.n_stocks
