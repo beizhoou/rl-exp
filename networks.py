@@ -36,22 +36,53 @@ class HeterogeneousFeatureEncoder(nn.Module):
         # x: (B, S, T, F) = (Batch, 471 Stocks, 20 Days, 40 Features)
         B, S, T, F = x.shape
         
-        # 高效并行处理：合并 batch 和 stock 维度
-        x = x.reshape(B * S, T, F)  # (B*S, T, F)
+        # 检查是否需要分批处理（避免PyTorch attention的65535限制）
+        # 当 B * S > 60000 时，需要分批
+        max_bs = 60000
+        total_bs = B * S
         
-        # 输入投影
-        x = self.input_proj(x)  # (B*S, T, d_model)
+        if total_bs <= max_bs:
+            # 小batch，直接处理
+            x = x.reshape(B * S, T, F)  # (B*S, T, F)
+            x = self.input_proj(x)  # (B*S, T, d_model)
+            x = self.temporal_encoder(x)  # (B*S, T, d_model)
+            x = x[:, -1, :].view(B, S, self.d_model)  # (B, S, d_model)
+        else:
+            # 大batch，分批处理
+            x_list = []
+            batch_size = max(1, max_bs // S)  # 计算每批的batch数
+            
+            for i in range(0, B, batch_size):
+                end_i = min(i + batch_size, B)
+                x_batch = x[i:end_i]  # (batch, S, T, F)
+                b = x_batch.shape[0]
+                
+                x_batch = x_batch.reshape(b * S, T, F)
+                x_batch = self.input_proj(x_batch)
+                x_batch = self.temporal_encoder(x_batch)
+                x_batch = x_batch[:, -1, :].view(b, S, self.d_model)
+                x_list.append(x_batch)
+            
+            x = torch.cat(x_list, dim=0)  # (B, S, d_model)
         
-        # Transformer 时序编码
-        x = self.temporal_encoder(x)  # (B*S, T, d_model)
-        
-        # 取最后时刻的输出，恢复形状
-        x = x[:, -1, :].view(B, S, self.d_model)  # (B, S, d_model)
         x = self.norm1(x)
         
-        # 跨股票注意力（捕捉行业轮动等截面效应）
-        attn_out, _ = self.cross_stock(x, x, x)
-        x = x + attn_out
+        # 跨股票注意力（分批处理避免OOM）
+        if B <= 64:  # 小batch直接处理
+            attn_out, _ = self.cross_stock(x, x, x)
+            x = x + attn_out
+        else:
+            # 大batch，分批处理attention
+            attn_list = []
+            chunk_size = 64
+            for i in range(0, B, chunk_size):
+                end_i = min(i + chunk_size, B)
+                x_chunk = x[i:end_i]  # (chunk, S, d_model)
+                attn_chunk, _ = self.cross_stock(x_chunk, x_chunk, x_chunk)
+                attn_list.append(attn_chunk)
+            attn_out = torch.cat(attn_list, dim=0)
+            x = x + attn_out
+        
         x = self.norm2(x)
         
         return x
