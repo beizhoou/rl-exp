@@ -72,6 +72,16 @@ class PortfolioTradingEnv(gym.Env):
             else:
                 self._feature_cache[date] = {}
             
+            # VLM数据存在性缓存（用于优先采样）
+            self._vlm_cache = {}
+            if 'vlm_report_count' in day_data.columns:
+                self._vlm_cache[date] = {
+                    row[self.cfg.data.stock_col]: (row.get('vlm_report_count', 0) > 0)
+                    for _, row in day_data.iterrows()
+                }
+            else:
+                self._vlm_cache[date] = {stock: False for stock in self.stocks}
+            
             # 可交易性（综合涨跌停和停牌）
             tradable_dict = {}
             limit_dict = {}
@@ -112,6 +122,14 @@ class PortfolioTradingEnv(gym.Env):
                     feats = list(date_features[stock].values())
                     if len(feats) == 40:
                         state[idx, t, :] = feats
+        
+        # 数据清洗：检查并修复 NaN/Inf
+        if np.isnan(state).any() or np.isinf(state).any():
+            nan_count = np.isnan(state).sum()
+            inf_count = np.isinf(state).sum()
+            if nan_count > 0 or inf_count > 0:
+                print(f"⚠️ Warning: State contains {nan_count} NaN, {inf_count} Inf at date_idx {date_idx}")
+                state = np.nan_to_num(state, nan=0.0, posinf=1.0, neginf=-1.0)
         
         return state.astype(np.float32)
     
@@ -240,11 +258,21 @@ class PortfolioTradingEnv(gym.Env):
         # 检查索引越界
         if current_idx >= len(self.dates):
             return self._get_state(len(self.dates) - 1) if len(self.dates) > 0 else np.zeros((self.n_stocks, self.lookback, 40)), 0, True, {}
+        
+        # 🔥 关键检查：动作是否包含 NaN/Inf
+        if np.isnan(action).any() or np.isinf(action).any():
+            print(f"🔥 CRITICAL: Action contains NaN/Inf at step {current_idx}!")
+            print(f"   Action stats: min={np.nanmin(action):.4f}, max={np.nanmax(action):.4f}")
+            print(f"   NaN count: {np.isnan(action).sum()}, Inf count: {np.isinf(action).sum()}")
+            # 用等权组合替代
+            action = np.ones(self.n_stocks) / self.n_stocks
+        
         current_date = self.dates[current_idx]
         
-        # 动作->权重
-        action_logits = torch.tensor(action)
-        raw_weights = F.softmax(action_logits, dim=0).numpy()
+        # 动作->权重（确保非负且和为1）
+        action = np.clip(action, a_min=1e-10, a_max=1.0)  # 防止负数或0
+        action = action / action.sum()  # 重新归一化
+        raw_weights = action
         
         # 应用约束
         weights = self._apply_constraints(raw_weights, current_idx + 1)
@@ -264,6 +292,9 @@ class PortfolioTradingEnv(gym.Env):
         port_return = 0
         for stock, idx in self.stock_to_idx.items():
             if stock in current_prices and stock in next_prices:
+                # 避免除零错误
+                if current_prices[stock] <= 0:
+                    continue
                 ret = (next_prices[stock] - current_prices[stock]) / current_prices[stock]
                 port_return += weights[idx] * ret
         
@@ -271,32 +302,41 @@ class PortfolioTradingEnv(gym.Env):
         cost = turnover * self.tc
         net_return = port_return - cost
         
-        # 奖励计算
+        # 奖励计算（PPO优化版）
         self.returns_buffer.append(net_return)
         if len(self.returns_buffer) > 60:
             self.returns_buffer.popleft()
         
         reward = 0
+        sharpe = 0
         if len(self.returns_buffer) >= 30:
             mean_ret = np.mean(self.returns_buffer)
             std_ret = np.std(self.returns_buffer) + 1e-6
             sharpe = (mean_ret - self.cfg.trading.risk_free_rate) / std_ret * np.sqrt(252)
             
-            # 多目标奖励
-            reward = sharpe * 0.5
+            # 简化奖励：直接使用日收益率（用于PPO的奖励缩放）
+            # 关键修改：原始收益率太小，需要放大100倍
+            reward = net_return
+            
+            # 可选：添加夏普比例作为额外奖励
+            reward += sharpe * 0.01
             
             # 回撤惩罚
             if len(self.history) > 1:
                 peak = max(self.history)
                 current_val = self.history[-1] * (1 + net_return)
                 dd = (peak - current_val) / peak
-                reward -= dd * 2.0
+                reward -= dd * 0.5
             
-            reward -= turnover * 0.1  # 换手率惩罚
-            hhi = np.sum(weights ** 2)
-            reward -= hhi * 0.1  # 集中度惩罚
+            # 换手率惩罚（适当降低）
+            reward -= turnover * 0.05
         else:
-            reward = net_return * 10
+            # Warmup阶段使用简单收益率
+            reward = net_return
+        
+        # PPO 奖励缩放（关键！将收益率放大100倍）
+        reward_scale = getattr(self.cfg.trading, 'reward_scale', 1.0)
+        reward = reward * reward_scale
         
         self.prev_weights = weights.copy()
         self.current_step += 1
@@ -309,6 +349,13 @@ class PortfolioTradingEnv(gym.Env):
         # 获取当前市场状态
         limit_up, limit_down, suspended = self._get_limit_status(current_idx + 1)
         
+        # 获取可交易掩码（用于PPO的Action Masking）
+        action_mask = self._get_tradable_mask(current_idx + 1)
+        
+        # 检查是否有VLM数据（用于优先采样）
+        vlm_dict = self._vlm_cache.get(next_date, {})
+        has_vlm_data = any(vlm_dict.get(stock, False) for stock in self.stock_to_idx.keys())
+        
         info = {
             'date': next_date,
             'portfolio_value': new_value,
@@ -318,7 +365,9 @@ class PortfolioTradingEnv(gym.Env):
             'sharpe': sharpe if len(self.returns_buffer) >= 30 else 0,
             'n_limit_up': int(limit_up.sum()),
             'n_limit_down': int(limit_down.sum()),
-            'n_suspended': int(suspended.sum())
+            'n_suspended': int(suspended.sum()),
+            'has_vlm_data': has_vlm_data,
+            'action_mask': action_mask  # (n_stocks,) 0/1 掩码，用于PPO Action Masking
         }
         
         return self._get_state(self.current_step), reward, done, info

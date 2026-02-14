@@ -1,33 +1,157 @@
 # 多模态强化学习投资组合交易系统 (Multi-Modal RL Portfolio Trading)
 
-## 项目概述
+基于 **PPO** (Proximal Policy Optimization) 和 **SAC** (Soft Actor-Critic) 算法的 A 股投资组合交易系统，采用**带验证集的滚动微调步进回测**方案，融合股吧情绪、基本面、VLM研报三类异构数据源。
 
-基于 Soft Actor-Critic (SAC) 算法的 A 股投资组合交易系统，融合三类异构数据源：
-- **股吧情绪数据** (Guba Sentiment): 散户情绪指标 (bullishness, panic, consensus)
-- **基本面/价量数据** (Market Data): OHLCV、技术指标、财务指标
-- **VLM 研报分析** (VLM Reports): 多模态大模型对研报图像的解析结果
+> ⚠️ **重要提示**：当前推荐使用 **PPO 算法**（默认），相比 SAC 更稳定，解决了梯度消失和熵噪声问题。
 
-## 项目结构
+## 🏆 核心特性：滚动微调步进回测 (Rolling Walk-Forward with Fine-tuning)
+
+针对 A 股**非平稳（Non-stationary）、高噪声、风格切换快**的市场特点，本系统采用顶级量化对冲基金的标准范式：
+
+### 窗口设计
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  训练集 (Train)          │ 验证集 (Val) │ 测试集 (Test)        │
+│  24个月                  │ 1个月        │ 1个月                 │
+│  用于梯度更新            │ 用于早停     │ 实盘模拟（记录净值）  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 滚动示意图
+
+| 轮次 (Step) | 训练集 (Train) | 验证集 (Val) | **测试集 (Test)** | 备注 |
+| :--- | :--- | :--- | :--- | :--- |
+| **Step 1** | 2019.01 - 2020.12 | 2021.01 | **2021.02** | 初始冷启动训练 |
+| **Step 2** | 2019.02 - 2021.01 | 2021.02 | **2021.03** | 继承权重，快速微调 |
+| **Step 3** | 2019.03 - 2021.02 | 2021.03 | **2021.04** | 保持数据新鲜度 |
+| ... | ... | ... | ... | ... |
+
+### 关键优势
+
+1. **验证集早停 (Early Stopping)**
+   - RL训练极其不稳定，使用验证集选出**表现最稳健的Checkpoint**
+   - 避免过拟合到训练集
+
+2. **增量学习 (Incremental Learning)**
+   - 每轮加载上一轮训练好的权重
+   - PPO: 使用相同网络结构快速适应新数据
+   - 解决灾难性遗忘，快速适应新行情
+
+3. **严格防止未来函数**
+   - 每个窗口独立进行特征标准化
+   - Fit on Train, Transform on Val/Test
+   - 杜绝数据泄露
+
+4. **工程优化**
+   - **奖励缩放**：将收益率放大 100 倍，解决梯度消失
+   - **Action Masking**：停牌/跌停股票权重强制为 0
+   - **Advantage 归一化**：稳定 PPO 训练
+
+## 🚀 算法对比：PPO vs SAC
+
+| 特性 | PPO (推荐) | SAC |
+|------|-----------|-----|
+| 策略类型 | On-policy | Off-policy |
+| 稳定性 | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ |
+| 训练速度 | 中等 | 较快 |
+| 熵控制 | 线性衰减 0.01→0 | 固定温度 |
+| 数值稳定性 | 高（Dirichlet分布） | 中（Softmax+log） |
+| 适用场景 | 金融序列决策 | 连续控制 |
+
+## 📁 项目结构
 
 ```
 exper_rl/
-├── README.md              # 项目说明文档
-├── broker_weights.py      # 券商影响力权重配置
-├── benchmarks.py          # 对比策略集合（7个基准策略）
-├── run_benchmarks.py      # 基准策略回测运行脚本
-├── config.py              # 全局配置
-├── data_loader.py         # 多源数据加载与40维特征工程
-├── environment.py         # A股交易环境 (含T+1、涨跌停约束)
-├── agent.py               # SAC算法智能体
-├── networks.py            # 异构特征编码器 + Actor/Critic网络
-├── trainer.py             # 滚动训练器 (12月训练/1月测试)
-├── utils.py               # 回放缓冲区、日志、可视化工具
-└── main.py                # 训练入口
+├── README.md                   # 项目说明文档（本文件）
+├── config.py                   # SAC 配置（遗留）
+├── config_ppo.py               # PPO 配置 ⭐推荐⭐
+├── data_loader.py              # 多源数据加载与40维特征工程
+├── preprocess_data.py          # 数据预处理脚本
+├── environment.py              # A股交易环境（奖励缩放+Action Mask）
+├── networks.py                 # 特征编码器 + Actor/Critic（支持PPO/SAC）
+├── ppo_agent.py                # PPO算法实现（Dirichlet+GAE）⭐核心⭐
+├── trainer_ppo.py              # PPO滚动训练器 ⭐核心⭐
+├── main_ppo.py                 # PPO训练入口 ⭐推荐⭐
+├── agent.py                    # SAC算法智能体（遗留）
+├── trainer.py                  # SAC滚动训练器（遗留）
+├── main.py                     # SAC训练入口（遗留）
+├── utils.py                    # 工具类（Buffer+标准化+可视化）
+├── benchmarks.py               # 7个对比策略集合
+├── run_benchmarks.py           # 基准策略回测脚本
+├── PPO_USAGE.md                # PPO使用详细指南
+└── example_usage.sh            # 使用示例脚本
 ```
 
-## 核心特性
+## 🎯 快速开始（PPO - 推荐）
 
-### 1. 异构特征融合 (40维)
+### 1. 安装依赖
+
+```bash
+pip install torch pandas numpy gym tqdm matplotlib seaborn tensorboard
+```
+
+### 2. 数据预处理（只需执行一次）
+
+```bash
+cd /root/autodl-tmp/exper_rl
+
+# 基础预处理（输出 processed_data.pkl）
+python preprocess_data.py
+
+# 或指定输出路径和日期范围
+python preprocess_data.py \
+    -o ./data/processed_2020_2023.pkl \
+    --start-date 2020-01-01 \
+    --end-date 2023-12-31
+```
+
+### 3. PPO 训练
+
+```bash
+# 基础训练（使用预处理数据，秒级启动）
+python main_ppo.py --preprocessed-data processed_data.pkl --device cuda
+
+# 训练并对比基准策略
+python main_ppo.py --preprocessed-data processed_data.pkl --device cuda --run-benchmarks
+
+# 自定义参数
+python main_ppo.py \
+    --preprocessed-data processed_data.pkl \
+    --device cuda \
+    --total-timesteps 200000 \
+    --batch-size 2048 \
+    --lr 3e-4
+```
+
+### 4. 仅运行对比策略
+
+```bash
+# 使用预处理数据
+python main_ppo.py --preprocessed-data processed_data.pkl --benchmark-only
+
+# 或从原始数据重新生成
+python run_benchmarks.py
+```
+
+## ⚙️ PPO 关键超参数
+
+在 `config_ppo.py` 中配置：
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `lr` | 3e-4 | 学习率 |
+| `gamma` | 0.99 | 折扣因子 |
+| `gae_lambda` | 0.95 | GAE系数，平衡偏差和方差 |
+| `clip_range` | 0.2 | PPO截断范围 |
+| `entropy_coef` | 0.01→0 | 熵系数（线性衰减）|
+| `batch_size` | 2048 | Rollout收集步数 |
+| `mini_batch_size` | 64 | 更新时的切片大小 |
+| `n_epochs` | 10 | 每次收集后的更新轮数 |
+| `reward_scale` | 100.0 | **关键！**收益率放大倍数 |
+
+## 📊 异构特征融合 (40维)
+
 | 特征组 | 维度 | 说明 |
 |--------|------|------|
 | 技术面 | ~15 | price_position, returns, volatility, MACD, RSI, volume... |
@@ -36,14 +160,8 @@ exper_rl/
 | VLM研报 | 8 | sentiment_score, rating_change, eps_g_y0~y2, profit_revision... |
 | 交互/派生 | ~6 | sentiment_consensus, momentum复合因子等 |
 
-### 2. 券商影响力加权
-VLM研报按券商影响力加权聚合：
-- **Tier 1** (中信、中金等): 权重 1.0
-- **Tier 2** (中大型): 权重 0.8
-- **Tier 3** (中小): 权重 0.6
-- **外资/其他**: 权重 0.5
+## 💰 A股交易约束
 
-### 3. A股交易约束
 - **T+1制度**: 当日买入次日才能卖出
 - **涨跌停限制**: 涨停不能买，跌停不能卖
 - **停牌处理**: 自动检测并排除停牌股票
@@ -51,48 +169,7 @@ VLM研报按券商影响力加权聚合：
 - **单股仓位上限**: 10%
 - **交易成本**: 双边 0.15%
 
-### 4. 训练流程
-- **滚动窗口训练**: 12个月训练 → 1个月测试，共12个窗口
-- **早停机制**: Sharpe无改善时提前停止
-- **混合精度训练**: AMP加速
-- **量化回放缓冲区**: uint8存储，节省75%内存
-
-## 快速开始
-
-### 安装依赖
-```bash
-pip install torch pandas numpy gym tqdm matplotlib seaborn tensorboard
-```
-
-### 训练RL策略
-```bash
-cd /root/autodl-tmp/exper_rl
-
-# 基础训练
-python main.py --windows 12 --device cuda
-
-# 训练后自动运行对比策略
-python main.py --windows 12 --run-benchmarks
-
-# 保存融合特征（调试用）
-python main.py --windows 12 --save-features --run-benchmarks
-```
-
-### 仅运行对比策略
-```bash
-# 使用已保存的特征数据
-python run_benchmarks.py --data fused_features.csv
-
-# 或从原始数据重新生成
-python run_benchmarks.py
-
-# 仅运行基准对比（不训练RL）
-python main.py --benchmark-only
-```
-
-## 对比策略 (Benchmarks)
-
-为验证RL策略有效性，实现了 **7个对比策略**，严格公平对比：
+## 🏆 对比策略 (Benchmarks)
 
 | 策略 | 逻辑 | 检验目标 |
 |------|------|---------|
@@ -104,15 +181,7 @@ python main.py --benchmark-only
 | **Low_Volatility** | 做多20日波动率最低10% | 低波动异象 |
 | **Sentiment_Driven** | 做多情绪得分最高10% | 多模态情绪价值 |
 
-**公平对比原则**:
-- 相同股票池: 471只A股
-- 相同交易成本: 0.15% 双边
-- 相同约束: 单股10%上限，无做空
-- 相同频率: 日度再平衡
-
-## 数据要求
-
-项目期望以下数据路径（可在 `config.py` 中修改）：
+## 📂 数据要求
 
 ```
 /root/autodl-tmp/data/
@@ -121,77 +190,57 @@ python main.py --benchmark-only
 └── vlm_sentiment_analysis_*.csv # VLM研报分析结果，单个文件
 ```
 
-### 各数据源字段要求
+## 📈 输出结果
 
-**股吧情绪 (guba_sentiment_results/)**
-```csv
-share_code, date, bullishness, panic, consensus, summary, prompt, status
+```
+./logs_ppo/              # TensorBoard 日志（PPO）
+./checkpoints_ppo/       # 模型权重
+./plots_ppo/             # 训练报告图
+./benchmark_results/     # 对比策略结果
 ```
 
-**基本面数据 (stcok_basic/)**
-```csv
-code/date, open, close, high, low, volume, daily_return, volatility_20, 
-pe_ttm, pb, peg, ps, market_cap, roe, growth, gross_margin, debt_ratio
-```
-
-**VLM研报分析**
-```csv
-share_code, date, broker, sentiment_score, rating_change, eps_g_y0, eps_g_y1, eps_g_y2,
-pe_forward_y1, profit_revision, revenue_revision, report_type, has_financial_table
-```
-
-## 输出结果
-
-训练完成后会生成以下目录：
-```
-./logs/              # TensorBoard 日志
-./checkpoints/       # 模型权重 (window{i}_best.pt, window{i}_final.pt)
-./plots/             # 训练报告图
-./benchmark_results/ # 对比策略结果
-├── benchmark_summary.csv      # 汇总表格
-├── benchmark_metrics.json     # 详细指标
-├── nav_*.csv                  # 各策略净值曲线
-└── benchmark_comparison.png   # 对比图表
-```
-
-## 关键超参数
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| n_stocks | 471 | 股票池数量 |
-| n_features | 40 | 特征维度 |
-| lookback_window | 20 | 时序回看天数 |
-| d_model | 128 | Transformer隐藏维度 |
-| transaction_cost | 0.0015 | 交易成本 |
-| max_position | 0.10 | 单股仓位上限 |
-| episodes_per_window | 5 | 每窗口训练轮数 |
-
-## 可视化监控
+## 🔍 可视化监控
 
 ```bash
+# PPO 训练日志
+tensorboard --logdir=./logs_ppo
+
+# SAC 训练日志（如使用）
 tensorboard --logdir=./logs
 ```
 
-可监控：
-- 组合净值 / 日收益率 / Sharpe 比率
-- Critic/Actor 损失
-- 持仓权重分布 / HHI 集中度
-- 各滚动窗口的测试表现
+## 🐛 故障排除
 
-## 结果解读
+### 问题：训练出现 NaN/Inf
 
-### RL策略有效性判断
-1. **Sharpe > CSI300**: 跑赢市场基准
-2. **Sharpe > Equal_Weight**: 具备选股/择时能力
-3. **Sharpe > Buy_Hold**: 主动管理有价值
-4. **Sharpe > Sentiment_Driven**: 多模态融合优于单一情绪策略
+**原因**：
+- Softmax + log 导致 log(0) = -inf
+- 输入数据含有 NaN/Inf
 
-### 可能的发现
-- **数据优势**: RL整合多源数据，可能优于单一因子策略
-- **动态适应**: 滚动训练使策略适应市场状态变化
-- **成本控制**: RL学习低换手率策略，降低交易成本
+**解决**：已修复！当前使用 Dirichlet 分布替代 Softmax，并添加数据清洗。
 
-## 待办/优化方向
+### 问题：Reward 恒定为负数
+
+**原因**：
+- 奖励信号太弱（0.01 级别）
+- 网络无法学习
+
+**解决**：已添加奖励缩放（100x），现在奖励在 [-5, +5] 范围。
+
+### 问题：GPU 内存不足
+
+```bash
+# 减小 batch size
+python main_ppo.py --preprocessed-data processed_data.pkl --batch-size 1024
+```
+
+### 问题：所有股票权重相同
+
+**原因**：温度系数不合适
+
+**解决**：调整 `config_ppo.py` 中的 `temperature` 参数（0.5-2.0）。
+
+## 📝 待办/优化方向
 
 - [ ] 特征重要性分析 (SHAP值)
 - [ ] 分组注意力（按特征来源分头）
@@ -199,35 +248,17 @@ tensorboard --logdir=./logs
 - [ ] 行业中性约束
 - [ ] 多进程数据加载加速
 - [ ] 添加 Risk Parity / Minimum Variance 基准
+- [ ] 自适应学习率（根据市场波动调整）
+- [ ] 模型集成（多窗口模型投票）
 
----
+## 📚 相关文档
 
-## 使用示例
-
-### 完整流程
-```bash
-# 1. 进入目录
-cd /root/autodl-tmp/exper_rl
-
-# 2. 训练RL策略并对比基准
-python main.py --windows 12 --run-benchmarks
-
-# 3. 查看结果
-cat benchmark_results/benchmark_summary.csv
-tensorboard --logdir=./logs
-```
-
-### 仅对比基准策略
-```bash
-python main.py --benchmark-only
-```
-
-### 自定义训练
-```bash
-python main.py --windows 12 --episodes 10 --batch-size 512 --run-benchmarks
-```
+- `PPO_USAGE.md` - PPO 算法详细使用指南
+- `NA_FIX_SUMMARY.md` - NaN/Inf 问题修复总结
+- `example_usage.sh` - 常用命令示例
 
 ---
 
 **作者**: Multi-Modal RL Trading System  
-**版本**: 0.2.0
+**版本**: 1.0.0 (PPO + SAC Dual Algorithm Support)  
+**更新日期**: 2024

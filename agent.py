@@ -154,3 +154,38 @@ class PortfolioSAC:
         self.critic1.load_state_dict(checkpoint['critic1'])
         self.critic2.load_state_dict(checkpoint['critic2'])
         self.log_alpha = checkpoint['alpha']
+    
+    def get_state_dict(self) -> Dict:
+        """
+        获取完整状态字典（用于增量学习）
+        包括网络权重和优化器状态
+        """
+        return {
+            'actor': self.actor.state_dict(),
+            'critic1': self.critic1.state_dict(),
+            'critic2': self.critic2.state_dict(),
+            'target_critic1': self.target_critic1.state_dict(),
+            'target_critic2': self.target_critic2.state_dict(),
+            'alpha': self.log_alpha,
+            'actor_optimizer': self.actor_optimizer.state_dict(),
+            'critic1_optimizer': self.critic1_optimizer.state_dict(),
+            'critic2_optimizer': self.critic2_optimizer.state_dict(),
+            'alpha_optimizer': self.alpha_optimizer.state_dict(),
+        }
+    
+    def load_state_dict(self, state_dict: Dict):
+        """
+        加载完整状态字典（用于增量学习）
+        """
+        self.actor.load_state_dict(state_dict['actor'])
+        self.critic1.load_state_dict(state_dict['critic1'])
+        self.critic2.load_state_dict(state_dict['critic2'])
+        self.target_critic1.load_state_dict(state_dict['target_critic1'])
+        self.target_critic2.load_state_dict(state_dict['target_critic2'])
+        self.log_alpha = state_dict['alpha']
+        
+        # 加载优化器状态（支持继续训练）
+        self.actor_optimizer.load_state_dict(state_dict['actor_optimizer'])
+        self.critic1_optimizer.load_state_dict(state_dict['critic1_optimizer'])
+        self.critic2_optimizer.load_state_dict(state_dict['critic2_optimizer'])
+        self.alpha_optimizer.load_state_dict(state_dict['alpha_optimizer'])

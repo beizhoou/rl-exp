@@ -1,10 +1,11 @@
 import pandas as pd
 import numpy as np
 import os
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 from glob import glob
 from tqdm import tqdm
 from broker_weights import get_broker_weight
+
 
 class MultiSourceDataLoader:
     """
@@ -15,6 +16,8 @@ class MultiSourceDataLoader:
     1. 所有填充操作在合并前完成，避免跨数据源泄露
     2. 时序填充严格按股票分组，不跨股票填充
     3. 研报数据非每日都有，使用有效期的向前填充
+    
+    新增：支持从预处理文件加载
     """
     def __init__(self, config):
         self.cfg = config
@@ -462,3 +465,77 @@ class MultiSourceDataLoader:
                 print(f"  {category} features missing: {missing:.2%}")
         
         return final_df
+
+
+class PreprocessedDataLoader:
+    """
+    从预处理文件加载数据
+    
+    使用方法:
+        loader = PreprocessedDataLoader()
+        df = loader.load('processed_data.pkl')
+    """
+    
+    def __init__(self, config=None):
+        self.cfg = config or data_cfg
+        
+    def load(self, input_path: str) -> pd.DataFrame:
+        """
+        从预处理文件加载数据
+        
+        Args:
+            input_path: 预处理文件路径 (.pkl)
+            
+        Returns:
+            预处理后的DataFrame
+        """
+        import pickle
+        
+        if not os.path.exists(input_path):
+            raise FileNotFoundError(f"预处理文件不存在: {input_path}")
+        
+        print(f"\n{'='*70}")
+        print(f"📂 从预处理文件加载数据")
+        print(f"{'='*70}")
+        print(f"文件: {input_path}")
+        
+        with open(input_path, 'rb') as f:
+            data_package = pickle.load(f)
+        
+        df = data_package['df']
+        feature_cols = data_package['feature_cols']
+        feature_stats = data_package.get('feature_stats', {})
+        metadata = data_package.get('metadata', {})
+        created_at = data_package.get('created_at', 'Unknown')
+        
+        print(f"✅ 加载成功!")
+        print(f"   创建时间: {created_at}")
+        print(f"   数据行数: {len(df):,}")
+        print(f"   股票数量: {df[self.cfg.stock_col].nunique()}")
+        print(f"   特征维度: {len(feature_cols)}")
+        print(f"   日期范围: {df[self.cfg.date_col].min()} ~ {df[self.cfg.date_col].max()}")
+        
+        # 应用日期过滤（如果配置中有指定）
+        if hasattr(self.cfg, 'start_date') and self.cfg.start_date:
+            df = df[df[self.cfg.date_col] >= self.cfg.start_date]
+        if hasattr(self.cfg, 'end_date') and self.cfg.end_date:
+            df = df[df[self.cfg.date_col] <= self.cfg.end_date]
+        
+        if len(df) < len(data_package['df']):
+            print(f"   过滤后行数: {len(df):,}")
+        
+        return df
+    
+    def load_with_stats(self, input_path: str) -> Tuple[pd.DataFrame, Dict]:
+        """
+        加载数据及统计量
+        
+        Returns:
+            (df, feature_stats)
+        """
+        import pickle
+        
+        with open(input_path, 'rb') as f:
+            data_package = pickle.load(f)
+        
+        return data_package['df'], data_package.get('feature_stats', {})
