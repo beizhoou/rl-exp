@@ -236,7 +236,8 @@ class MultiSourceDataLoader:
     
     def _engineer_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        特征工程：构造40维最终特征
+        特征工程：构造动态维度的最终特征
+        不再硬性要求40维，支持任意数量的有效特征
         """
         print("Engineering features...")
         
@@ -268,27 +269,30 @@ class MultiSourceDataLoader:
         tech_features['high_low_ratio'] = df['high'] / df['low'] - 1
         tech_features['open_close_ratio'] = df['open'] / df['close'] - 1
         
-        # 技术指标（MACD）
-        def calc_macd(group):
-            ema12 = group['close'].ewm(span=12).mean()
-            ema26 = group['close'].ewm(span=26).mean()
-            macd = ema12 - ema26
-            signal = macd.ewm(span=9).mean()
-            return pd.DataFrame({'macd': macd, 'macd_signal': signal})
+        # 技术指标（MACD）- 使用 transform 避免索引错位
+        # 先计算 MACD (12, 26) 保存到临时列
+        df['_ema12'] = df.groupby(self.cfg.stock_col)['close'].transform(lambda x: x.ewm(span=12, adjust=False).mean())
+        df['_ema26'] = df.groupby(self.cfg.stock_col)['close'].transform(lambda x: x.ewm(span=26, adjust=False).mean())
+        df['_macd'] = df['_ema12'] - df['_ema26']
+        tech_features['macd'] = df['_macd']
         
-        macd_df = df.groupby(self.cfg.stock_col).apply(calc_macd).reset_index(drop=True)
-        tech_features['macd'] = macd_df['macd']
-        tech_features['macd_signal'] = macd_df['macd_signal']
+        # 计算 MACD 信号线 (9) - 基于 MACD 的 EMA
+        tech_features['macd_signal'] = df.groupby(self.cfg.stock_col)['_macd'].transform(
+            lambda x: x.ewm(span=9, adjust=False).mean()
+        )
         
-        # RSI
-        def calc_rsi(group, period=14):
-            delta = group['close'].diff()
+        # 清理临时列
+        df = df.drop(columns=['_ema12', '_ema26', '_macd'])
+        
+        # RSI - 使用 transform 避免索引错位
+        def calc_rsi_simple(close, period=14):
+            delta = close.diff()
             gain = delta.where(delta > 0, 0).rolling(period).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(period).mean()
             rs = gain / (loss + 1e-8)
             return 100 - (100 / (1 + rs))
         
-        tech_features['rsi'] = df.groupby(self.cfg.stock_col).apply(calc_rsi).reset_index(drop=True)
+        tech_features['rsi'] = df.groupby(self.cfg.stock_col)['close'].transform(calc_rsi_simple)
         
         # 2. 基本面特征（8维）
         fund_features = {}
@@ -384,37 +388,50 @@ class MultiSourceDataLoader:
                                        (feature_df['close'] == feature_df['open']) & 
                                        (feature_df['high'] == feature_df['low'])).astype(int)
         
-        # 确保正好40维特征
+        # 动态特征维度：使用所有非元数据列作为特征
         exclude_cols = [self.cfg.stock_col, self.cfg.date_col, 'close', 'open', 'high', 'low', 
                        'volume', 'tradable', 'hit_limit_up', 'hit_limit_down', 'is_st', 'is_suspended']
         feature_cols = [c for c in feature_df.columns if c not in exclude_cols]
+        n_features = len(feature_cols)
         
-        # 如果超过40维，选择最重要的；如果不足，填充0
-        if len(feature_cols) > 40:
-            print(f"Warning: {len(feature_cols)} features found, selecting top 40")
-            # 基于与收益率的相关性选择
+        print(f"  Generated {n_features} raw features")
+        
+        # 如果特征太多，选择与收益率相关性最高的（最多保留50个）
+        if n_features > 50:
+            print(f"  Selecting top 50 features by correlation with daily_return")
             if 'daily_return' in feature_df.columns:
                 corrs = feature_df[feature_cols].corrwith(feature_df['daily_return'])
-                feature_cols = corrs.abs().nlargest(40).index.tolist()
+                feature_cols = corrs.abs().nlargest(50).index.tolist()
             else:
-                feature_cols = feature_cols[:40]
-        elif len(feature_cols) < 40:
-            print(f"Warning: Only {len(feature_cols)} features found, padding with zeros")
-            for i in range(40 - len(feature_cols)):
-                feature_df[f'pad_{i}'] = 0
-            # 更新feature_cols以包含新添加的填充列
-            feature_cols = [c for c in feature_df.columns if c not in exclude_cols]
+                feature_cols = feature_cols[:50]
+            n_features = len(feature_cols)
         
-        # 重命名为f_0到f_39
-        final_cols = feature_cols[:40]
-        rename_map = {col: f'f_{i}' for i, col in enumerate(final_cols)}
+        # 重命名为f_0到f_{n-1}
+        rename_map = {col: f'f_{i}' for i, col in enumerate(feature_cols)}
         feature_df.rename(columns=rename_map, inplace=True)
         
-        # 选择最终列
+        # 选择最终列（动态维度）
+        final_feature_cols = [f'f_{i}' for i in range(n_features)]
         final_columns = [self.cfg.stock_col, self.cfg.date_col, 'close', 'open', 'high', 'low',
                         'volume', 'tradable', 'hit_limit_up', 'hit_limit_down', 'is_st', 'is_suspended'] + \
-                       [f'f_{i}' for i in range(40)]
+                       final_feature_cols
         final_df = feature_df[[c for c in final_columns if c in feature_df.columns]]
+        
+        # 积极填充缺失值（关键！防止state中出现NaN）
+        # 1. 按股票分组前向填充（用同股票历史值填充）
+        for col in final_feature_cols:
+            if col in final_df.columns:
+                final_df[col] = final_df.groupby(self.cfg.stock_col)[col].ffill().bfill()
+        
+        # 2. 仍有NaN的，用0填充
+        final_df[final_feature_cols] = final_df[final_feature_cols].fillna(0)
+        
+        # 3. 检查并报告NaN情况
+        nan_count = final_df[final_feature_cols].isna().sum().sum()
+        if nan_count > 0:
+            print(f"  Warning: {nan_count} NaN values remain after filling")
+        
+        print(f"  Final feature dimensions: {n_features}")
         
         return final_df
     

@@ -55,8 +55,10 @@ class PPOTrainer:
         self.logger = TensorboardLogger(train_config.log_dir)
         self.visualizer = Visualizer(train_config.plot_dir)
         
-        # 特征列
+        # 特征列（动态维度）
         self.feature_cols = [c for c in df.columns if c.startswith('f_')]
+        self.n_features = len(self.feature_cols)
+        print(f"Feature dimensions: {self.n_features}")
         
         # 状态追踪
         self.window_splits = []
@@ -228,7 +230,7 @@ class PPOTrainer:
         
         # 创建网络
         network = create_networks(
-            self.data.n_stocks, 40, self.data.lookback_window,
+            self.data.n_stocks, self.n_features, self.data.lookback_window,
             self.model.d_model, self.model.temperature, self.config.device
         )
         
@@ -243,7 +245,7 @@ class PPOTrainer:
         # 创建 Rollout Buffer
         buffer = RolloutBuffer(
             self.ppo.batch_size, self.data.n_stocks,
-            self.data.lookback_window, 40, self.config.device
+            self.data.lookback_window, self.n_features, self.config.device
         )
         
         # 训练循环
@@ -281,11 +283,13 @@ class PPOTrainer:
             buffer.clear()
             
             # 记录训练指标
+            avg_reward = np.mean(episode_info['rewards'])
             self.logger.log_training(
                 loss_info['value_loss'],
                 loss_info['policy_loss'],
                 loss_info['entropy_loss'],
-                self.global_step
+                self.global_step,
+                reward=avg_reward
             )
             
             # 打印进度

@@ -256,10 +256,13 @@ class TensorboardLogger:
     def __init__(self, log_dir: str):
         self.writer = SummaryWriter(log_dir=log_dir)
         
-    def log_training(self, critic_loss: float, actor_loss: float, entropy: float, step: int):
+    def log_training(self, critic_loss: float, actor_loss: float, entropy: float, 
+                     step: int, reward: float = None):
         self.writer.add_scalar('Loss/Critic', critic_loss, step)
         self.writer.add_scalar('Loss/Actor', actor_loss, step)
         self.writer.add_scalar('Train/Entropy', entropy, step)
+        if reward is not None:
+            self.writer.add_scalar('Train/Reward', reward, step)
         
     def log_step(self, portfolio_value: float, daily_return: float, 
                  sharpe: float, turnover: float, weights: np.ndarray, step: int):

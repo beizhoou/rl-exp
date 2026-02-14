@@ -32,14 +32,16 @@ class PortfolioTradingEnv(gym.Env):
         self.tc = config.trading.transaction_cost
         self.max_pos = config.trading.max_position
         
-        # 特征列（f_0到f_39）
+        # 特征列（动态支持任意维度，f_* 开头的列）
         self.feature_cols = [c for c in df.columns if c.startswith('f_')]
-        assert len(self.feature_cols) == 40, f"Expected 40 features, got {len(self.feature_cols)}"
+        self.n_features = len(self.feature_cols)
+        print(f"Features detected: {self.n_features} dimensions")
+        # 移除硬性40维要求，支持动态特征数
         
         self.action_space = spaces.Box(low=-np.inf, high=np.inf, shape=(self.n_stocks,), dtype=np.float32)
         self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf,
-            shape=(self.n_stocks, self.lookback, 40),
+            shape=(self.n_stocks, self.lookback, self.n_features),
             dtype=np.float32
         )
         
@@ -67,8 +69,16 @@ class PortfolioTradingEnv(gym.Env):
             features = day_data.set_index(self.cfg.data.stock_col)[self.feature_cols]
             if len(features) > 0:
                 mean = features.mean()
-                std = features.std() + 1e-8
-                self._feature_cache[date] = ((features - mean) / std).to_dict('index')
+                std = features.std()
+                # 处理 std=0 的情况（所有股票该特征值相同）
+                std = std.replace(0, 1.0)  # 如果std=0，设为1避免除以0
+                std = std + 1e-8  # 再加小量保险
+                
+                # 标准化并处理可能的 NaN
+                normalized = ((features - mean) / std)
+                normalized = normalized.fillna(0)  # 填充任何产生的NaN
+                
+                self._feature_cache[date] = normalized.to_dict('index')
             else:
                 self._feature_cache[date] = {}
             
@@ -113,14 +123,14 @@ class PortfolioTradingEnv(gym.Env):
         else:
             date_slice = self.dates[date_idx-self.lookback:date_idx]
         
-        state = np.zeros((self.n_stocks, self.lookback, 40))
+        state = np.zeros((self.n_stocks, self.lookback, self.n_features))
         
         for t, date in enumerate(date_slice):
             date_features = self._feature_cache.get(date, {})
             for stock, idx in self.stock_to_idx.items():
                 if stock in date_features:
                     feats = list(date_features[stock].values())
-                    if len(feats) == 40:
+                    if len(feats) == self.n_features:
                         state[idx, t, :] = feats
         
         # 数据清洗：检查并修复 NaN/Inf
@@ -257,7 +267,7 @@ class PortfolioTradingEnv(gym.Env):
         current_idx = self.current_step
         # 检查索引越界
         if current_idx >= len(self.dates):
-            return self._get_state(len(self.dates) - 1) if len(self.dates) > 0 else np.zeros((self.n_stocks, self.lookback, 40)), 0, True, {}
+            return self._get_state(len(self.dates) - 1) if len(self.dates) > 0 else np.zeros((self.n_stocks, self.lookback, self.n_features)), 0, True, {}
         
         # 🔥 关键检查：动作是否包含 NaN/Inf
         if np.isnan(action).any() or np.isinf(action).any():

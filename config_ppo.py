@@ -22,17 +22,17 @@ class DataConfig:
     date_col: str = "date"
     stock_col: str = "share_code"  # 统一使用share_code作为股票标识
     
-    # 特征维度配置（总计40维）
-    # 1. 价量技术面特征 (15维)
+    # 特征维度配置（动态支持任意维度，不再硬性要求40维）
+    # 1. 价量技术面特征
     tech_features: List[str] = None  # 将在运行时填充
     
-    # 2. 基本面特征 (8维)
+    # 2. 基本面特征
     fundamental_features: List[str] = None
     
-    # 3. 股吧情绪特征 (3维)
+    # 3. 股吧情绪特征
     guba_features: List[str] = field(default_factory=lambda: ["bullishness", "panic", "consensus"])
     
-    # 4. VLM研报特征 (8维)
+    # 4. VLM研报特征
     vlm_features: List[str] = field(default_factory=lambda: [
         "sentiment_score", "rating_change", "eps_g_y0", 
         "eps_g_y1", "eps_g_y2", "profit_revision", 
@@ -41,7 +41,7 @@ class DataConfig:
     
     # 数据参数
     n_stocks: int = 471
-    n_features: int = 40  # tech(15) + fundamental(8) + guba(3) + vlm(8) + derived(6)
+    n_features: int = None  # 将在运行时自动检测（f_* 开头的列数）
     lookback_window: int = 20
     
     # 滚动窗口配置
@@ -109,12 +109,12 @@ class PPOConfig:
     entropy_coef_final: float = 0.0       # 最终熵系数
     
     # Value Loss 系数
-    value_coef: float = 0.5               # Value loss 权重
+    value_coef: float = 1.0               # Value loss 权重（配合 returns 归一化）
     
     # 训练控制
-    batch_size: int = 2048                # 每次收集的步数（大 batch 估算梯度）
-    mini_batch_size: int = 64             # 更新时的切片大小
-    n_epochs: int = 10                    # 每次收集后更新的轮数
+    batch_size: int = 4096                # 每次收集的步数（适中，平衡效率与稳定性）
+    mini_batch_size: int = 128            # 更新时的切片大小（增大，更稳定）
+    n_epochs: int = 5                     # 每次收集后更新的轮数（减小，防止过拟合）
     
     # 梯度裁剪
     max_grad_norm: float = 0.5            # 梯度裁剪阈值
@@ -144,13 +144,13 @@ class TrainingConfig:
         return data_cfg.rolling_step_months
     
     # 训练控制
-    total_timesteps_per_window: int = 100000  # 每个窗口的总训练步数
-    n_rollout_steps: int = 2048               # 每次收集的轨迹长度
+    total_timesteps_per_window: int = 200000  # 每个窗口的总训练步数（增加，约100次更新）
+    n_rollout_steps: int = 4096               # 每次收集的轨迹长度
     
     # 验证和早停
-    eval_interval: int = 2048                 # 评估间隔
-    early_stop_patience: int = 5              # 早停耐心值
-    min_sharpe_improvement: float = 0.01      # 最小 Sharpe 改善
+    eval_interval: int = 8192                 # 评估间隔（每2轮评估一次）
+    early_stop_patience: int = 10             # 早停耐心值（增加，允许更多探索）
+    min_sharpe_improvement: float = 0.005     # 最小 Sharpe 改善（降低，更容易触发）
     
     # 增量学习配置
     inherit_weights: bool = True              # 是否继承上一窗口权重

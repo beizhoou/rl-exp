@@ -323,14 +323,23 @@ class PPOAgent:
                 value_pred = new_values.squeeze()
                 returns_batch = batch.returns
                 
+                # Returns 归一化（防止 value loss 过大）
+                returns_mean = returns_batch.mean()
+                returns_std = returns_batch.std() + 1e-8
+                returns_normalized = (returns_batch - returns_mean) / returns_std
+                
+                # 对 value 也做相应的归一化（使其匹配 normalized returns）
+                value_pred_normalized = (value_pred - returns_mean) / returns_std
+                value_old_normalized = (batch.values - returns_mean) / returns_std
+                
                 # Value clipping（可选）
-                value_pred_clipped = batch.values + torch.clamp(
-                    value_pred - batch.values,
+                value_pred_clipped = value_old_normalized + torch.clamp(
+                    value_pred_normalized - value_old_normalized,
                     -self.config.ppo.clip_range,
                     self.config.ppo.clip_range
                 )
-                value_loss1 = F.mse_loss(value_pred, returns_batch)
-                value_loss2 = F.mse_loss(value_pred_clipped, returns_batch)
+                value_loss1 = F.mse_loss(value_pred_normalized, returns_normalized)
+                value_loss2 = F.mse_loss(value_pred_clipped, returns_normalized)
                 value_loss = 0.5 * torch.max(value_loss1, value_loss2)
                 
                 # ========== Entropy Loss ==========
