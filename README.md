@@ -323,6 +323,52 @@ python analyze_reward_design.py
 
 实验配置文件: `sharpe_focused_search.py` 中的 `SHARPE_EXPERIMENTS`
 
+## 🆕 V2 重大更新：修复负奖励问题 (2025-02-14)
+
+针对 **"Reward一直为负"** 这一量化 RL 的常见问题，V2 版本实现了以下关键改进：
+
+### V2 核心改进
+
+| 改进项 | 说明 | 效果 |
+|--------|------|------|
+| **现金仓位** | 增加第 472 维资产（现金），允许空仓避险 | 熊市中避免强制亏损 |
+| **0成本调试** | `--debug-zero-cost` 支持无成本训练验证 | 快速验证模型有效性 |
+| **改进奖励函数** | 对数收益 + 方差惩罚 + 换手率惩罚 | 更稳定的训练信号 |
+| **课程学习** | 分阶段增加难度（收益→风险→成本） | 逐步收敛，避免迷茫 |
+| **Softmax+Gaussian** | 替代 Dirichlet，支持 Top-K 截断 | 更稳定的策略分布 |
+
+### V2 快速开始
+
+```bash
+# 1. 调试模式（首次运行推荐）
+python main_ppo_v2.py --debug-zero-cost --enable-cash --reward-mode profit_only --max-windows 2
+
+# 2. 课程学习
+python main_ppo_v2.py --enable-cash --curriculum
+
+# 3. 完整训练
+python main_ppo_v2.py --enable-cash --reward-mode risk_adjusted --turnover-penalty 0.3
+
+# 或使用脚本
+./run_v2.sh debug      # 调试模式
+./run_v2.sh curriculum # 课程学习
+./run_v2.sh full       # 完整训练
+```
+
+### V2 文件说明
+
+```
+exper_rl/
+├── *_v2.py              # V2 版本核心文件
+├── run_v2.sh            # V2 快速启动脚本
+├── README_v2.md         # V2 详细文档
+└── V2_IMPROVEMENTS_SUMMARY.md  # V2 改进总结
+```
+
+> 📖 详见：`README_v2.md`、`V2_IMPROVEMENTS_SUMMARY.md`、`Fix_neg_reward.md`
+
+---
+
 ## 📝 待办/优化方向
 
 - [ ] 特征重要性分析 (SHAP值)
