@@ -77,8 +77,11 @@ class TradingConfig:
     use_tradable_mask: bool = True        # 使用可交易mask
     min_trade_unit: int = 100             # 最小交易单位（1手=100股）
     
-    # PPO 奖励缩放
-    reward_scale: float = 100.0           # 奖励缩放系数（关键！将收益率放大100倍）
+    # PPO 奖励配置（风险调整后收益核心）
+    reward_mode: str = 'sharpe_only'      # 奖励模式: sharpe_only | sharpe_return_balanced | sortino | calmar | risk_parity
+    reward_scale: float = 10.0            # 奖励缩放系数（夏普比率通常在-2~2之间，不需要100倍缩放）
+    turnover_penalty: float = 0.01        # 换手率惩罚系数
+    concentration_penalty: float = 0.1    # 集中度惩罚系数（单股>10%触发）
 
 @dataclass
 class ModelConfig:

@@ -312,7 +312,7 @@ class PortfolioTradingEnv(gym.Env):
         cost = turnover * self.tc
         net_return = port_return - cost
         
-        # 奖励计算（PPO优化版）
+        # 奖励计算（风险调整后收益 - 核心改进）
         self.returns_buffer.append(net_return)
         if len(self.returns_buffer) > 60:
             self.returns_buffer.popleft()
@@ -324,27 +324,62 @@ class PortfolioTradingEnv(gym.Env):
             std_ret = np.std(self.returns_buffer) + 1e-6
             sharpe = (mean_ret - self.cfg.trading.risk_free_rate) / std_ret * np.sqrt(252)
             
-            # 简化奖励：直接使用日收益率（用于PPO的奖励缩放）
-            # 关键修改：原始收益率太小，需要放大100倍
-            reward = net_return
+            # ========== 风险调整奖励方案选择 ==========
+            # 通过 cfg.trading.reward_mode 选择奖励模式
+            reward_mode = getattr(self.cfg.trading, 'reward_mode', 'sharpe_only')
             
-            # 可选：添加夏普比例作为额外奖励
-            reward += sharpe * 0.01
+            if reward_mode == 'sharpe_only':
+                # 方案1: 纯夏普比率（最推荐）
+                # 直接优化风险调整收益，避免过度冒险
+                reward = sharpe
+                
+            elif reward_mode == 'sharpe_return_balanced':
+                # 方案2: 夏普 + 收益平衡
+                # 在保证风险可控的前提下追求收益
+                reward = sharpe * 0.6 + net_return * 10  # 夏普占主导
+                
+            elif reward_mode == 'sortino':
+                # 方案3: Sortino比率（只惩罚下行风险）
+                downside_returns = [r for r in self.returns_buffer if r < 0]
+                downside_std = np.std(downside_returns) + 1e-6 if downside_returns else 1e-6
+                sortino = (mean_ret - self.cfg.trading.risk_free_rate) / downside_std * np.sqrt(252)
+                reward = sortino
+                
+            elif reward_mode == 'calmar':
+                # 方案4: Calmar比率（收益/最大回撤）
+                if len(self.history) > 1:
+                    peak = max(self.history)
+                    current_val = self.history[-1]
+                    max_dd = (peak - current_val) / peak if peak > current_val else 0
+                    max_dd = max(max_dd, 0.01)  # 至少1%避免除0
+                    annual_ret = mean_ret * 252
+                    calmar = annual_ret / max_dd
+                    reward = calmar * 0.1  # 缩放
+                else:
+                    reward = sharpe
+                    
+            elif reward_mode == 'risk_parity':
+                # 方案5: 风险平价（惩罚波动率）
+                reward = net_return * 10 - std_ret * 100  # 收益 - 风险惩罚
+                
+            else:  # default fallback
+                reward = sharpe
             
-            # 回撤惩罚
-            if len(self.history) > 1:
-                peak = max(self.history)
-                current_val = self.history[-1] * (1 + net_return)
-                dd = (peak - current_val) / peak
-                reward -= dd * 0.5
+            # 统一添加辅助惩罚项（所有模式通用）
+            # 换手率惩罚（避免过度交易）
+            turnover_penalty = turnover * getattr(self.cfg.trading, 'turnover_penalty', 0.01)
+            reward -= turnover_penalty
             
-            # 换手率惩罚（适当降低）
-            reward -= turnover * 0.05
+            # 集中度惩罚（避免单股重仓）
+            max_weight = np.max(weights)
+            concentration_penalty = max(0, max_weight - 0.1) * getattr(self.cfg.trading, 'concentration_penalty', 0.1)
+            reward -= concentration_penalty
+            
         else:
-            # Warmup阶段使用简单收益率
-            reward = net_return
+            # Warmup阶段使用简单夏普近似
+            reward = net_return * 10 if net_return > 0 else net_return * 20  # 亏损惩罚加倍
         
-        # PPO 奖励缩放（关键！将收益率放大100倍）
+        # PPO 奖励缩放（根据reward_mode自动调整）
         reward_scale = getattr(self.cfg.trading, 'reward_scale', 1.0)
         reward = reward * reward_scale
         

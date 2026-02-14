@@ -48,6 +48,11 @@
    - **Action Masking**：停牌/跌停股票权重强制为 0
    - **Advantage 归一化**：稳定 PPO 训练
 
+5. **风险调整奖励** (2025-02-14 更新)
+   - **Reward = Sharpe Ratio**（而非原始收益率）
+   - 支持多种风险指标：Sharpe / Sortino / Calmar / Risk Parity
+   - 避免策略过度冒险，真正优化风险调整后收益
+
 ## 🚀 算法对比：PPO vs SAC
 
 | 特性 | PPO (推荐) | SAC |
@@ -279,6 +284,44 @@ python main_ppo.py --preprocessed-data processed_data.pkl --batch-size 1024
 #### 训练稳定性修复
 - **Value Loss过大问题**：添加Returns归一化（均值0，方差1）
 - **Returns范围**：从 ~[-1000, +1000] 归一化到 ~[-3, +3]
+
+### 2025-02-14: 风险调整奖励 + 超参数搜索
+
+#### 奖励函数重构（核心改进）
+旧设计（问题）：
+```python
+reward = return + sharpe*0.01  # 收益率为主，风险权重太低
+```
+
+新设计（解决）：
+```python
+reward = sharpe_ratio  # 纯风险调整收益
+# 可选: sortino | calmar | risk_parity
+```
+
+**5种奖励模式** (`config_ppo.py` 中 `reward_mode`):
+| 模式 | 公式 | 适用场景 |
+|------|------|----------|
+| `sharpe_only` | Sharpe Ratio | 平衡风险收益（推荐）|
+| `sharpe_return_balanced` | 0.6×Sharpe + 0.4×Return | 兼顾绝对收益 |
+| `sortino` | Sortino Ratio | 只惩罚下行风险 |
+| `calmar` | Return / MaxDD | 严格控制回撤 |
+| `risk_parity` | Return - Risk Penalty | 风险平价策略 |
+
+#### 超参数搜索工具
+
+```bash
+# 快速测试关键5组配置
+python sharpe_focused_search.py --experiments key --n-windows 2 --timesteps 50000
+
+# 完整12组实验
+python sharpe_focused_search.py --experiments all
+
+# 对比分析
+python analyze_reward_design.py
+```
+
+实验配置文件: `sharpe_focused_search.py` 中的 `SHARPE_EXPERIMENTS`
 
 ## 📝 待办/优化方向
 
