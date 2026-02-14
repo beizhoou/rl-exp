@@ -1,0 +1,42 @@
+{
+  "sharpe_pure": {
+    "exp_name": "sharpe_pure",
+    "final_val_sharpe": 0.0,
+    "final_test_sharpe": 0.0,
+    "avg_reward": 0.0,
+    "best_val_sharpe": -999,
+    "converged": false
+  },
+  "sharpe_balanced": {
+    "exp_name": "sharpe_balanced",
+    "final_val_sharpe": 0.0,
+    "final_test_sharpe": 0.0,
+    "avg_reward": 0.0,
+    "best_val_sharpe": -999,
+    "converged": false
+  },
+  "sharpe_lr1e-4": {
+    "exp_name": "sharpe_lr1e-4",
+    "final_val_sharpe": 0.0,
+    "final_test_sharpe": 0.0,
+    "avg_reward": 0.0,
+    "best_val_sharpe": -999,
+    "converged": false
+  },
+  "sharpe_high_entropy": {
+    "exp_name": "sharpe_high_entropy",
+    "final_val_sharpe": 0.0,
+    "final_test_sharpe": 0.0,
+    "avg_reward": 0.0,
+    "best_val_sharpe": -999,
+    "converged": false
+  },
+  "sharpe_optimal": {
+    "exp_name": "sharpe_optimal",
+    "final_val_sharpe": 0.0,
+    "final_test_sharpe": 0.0,
+    "avg_reward": 0.0,
+    "best_val_sharpe": -999,
+    "converged": false
+  }
+}

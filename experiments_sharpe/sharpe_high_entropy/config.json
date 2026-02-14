@@ -1,0 +1,11 @@
+{
+  "name": "\u590f\u666e + \u9ad8\u63a2\u7d22",
+  "description": "entropy=0.05\uff0c\u589e\u52a0\u7b56\u7565\u63a2\u7d22",
+  "reward_mode": "sharpe_only",
+  "reward_scale": 10.0,
+  "lr": 0.0003,
+  "batch_size": 2048,
+  "entropy_coef": 0.05,
+  "entropy_coef_final": 0.01,
+  "gae_lambda": 0.95
+}

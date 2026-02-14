@@ -1,0 +1,10 @@
+{
+  "name": "\u7eaf\u590f\u666e\u6bd4\u7387",
+  "description": "\u53ea\u4f18\u5316Sharpe\uff0c\u6700\u7a33\u5065\u7684\u98ce\u9669\u8c03\u6574\u6536\u76ca",
+  "reward_mode": "sharpe_only",
+  "reward_scale": 10.0,
+  "lr": 0.0003,
+  "batch_size": 2048,
+  "entropy_coef": 0.01,
+  "gae_lambda": 0.95
+}

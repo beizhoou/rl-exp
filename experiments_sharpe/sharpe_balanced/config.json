@@ -1,0 +1,10 @@
+{
+  "name": "\u590f\u666e+\u6536\u76ca\u5e73\u8861",
+  "description": "60%\u590f\u666e + 40%\u6536\u76ca\uff0c\u517c\u987e\u98ce\u9669\u548c\u56de\u62a5",
+  "reward_mode": "sharpe_return_balanced",
+  "reward_scale": 10.0,
+  "lr": 0.0003,
+  "batch_size": 2048,
+  "entropy_coef": 0.01,
+  "gae_lambda": 0.95
+}

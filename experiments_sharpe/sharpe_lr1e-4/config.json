@@ -1,0 +1,10 @@
+{
+  "name": "\u590f\u666e + \u4f4e\u5b66\u4e60\u7387",
+  "description": "lr=1e-4\uff0c\u66f4\u7a33\u5b9a\u7684\u5b66\u4e60\u8fc7\u7a0b",
+  "reward_mode": "sharpe_only",
+  "reward_scale": 10.0,
+  "lr": 0.0001,
+  "batch_size": 2048,
+  "entropy_coef": 0.01,
+  "gae_lambda": 0.95
+}

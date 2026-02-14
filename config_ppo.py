@@ -115,8 +115,8 @@ class PPOConfig:
     value_coef: float = 1.0               # Value loss 权重（配合 returns 归一化）
     
     # 训练控制
-    batch_size: int = 2048                # 每次收集的步数（减小防止OOM，原4096太大）
-    mini_batch_size: int = 64             # 更新时的切片大小（减小防止OOM）
+    batch_size: int = 512                 # 每次收集的步数（2048对于471股太大，改512）
+    mini_batch_size: int = 32             # 更新时的切片大小（配合batch_size）
     n_epochs: int = 5                     # 每次收集后更新的轮数（减小，防止过拟合）
     
     # 梯度裁剪
@@ -147,8 +147,8 @@ class TrainingConfig:
         return data_cfg.rolling_step_months
     
     # 训练控制
-    total_timesteps_per_window: int = 100000  # 每个窗口的总训练步数（约50次更新）
-    n_rollout_steps: int = 2048               # 每次收集的轨迹长度（与batch_size匹配）
+    total_timesteps_per_window: int = 100000  # 每个窗口的总训练步数（约200次更新）
+    n_rollout_steps: int = 512                # 每次收集的轨迹长度（与batch_size匹配）
     
     # 验证和早停
     eval_interval: int = 4096                 # 评估间隔（每2轮评估一次）
