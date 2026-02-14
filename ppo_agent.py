@@ -370,6 +370,13 @@ class PPOAgent:
                 policy_losses.append(policy_loss.item())
                 value_losses.append(value_loss.item())
                 entropy_losses.append(entropy_loss.item())
+                
+                # 显存优化：删除不需要的 tensor 并清理缓存
+                del observations, actions, alpha, dist, new_log_probs, entropy, new_values
+                del ratio, surr1, surr2, policy_loss, value_loss, entropy_loss, loss
+            
+            # 每个 epoch 结束后清理显存
+            torch.cuda.empty_cache()
         
         self.update_count += 1
         

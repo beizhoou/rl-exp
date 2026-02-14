@@ -145,11 +145,11 @@ python run_benchmarks.py
 | `gae_lambda` | 0.95 | GAE系数，平衡偏差和方差 |
 | `clip_range` | 0.2 | PPO截断范围 |
 | `entropy_coef` | 0.01→0 | 熵系数（线性衰减）|
-| `batch_size` | 4096 | Rollout收集步数 |
-| `mini_batch_size` | 128 | 更新时的切片大小 |
+| `batch_size` | 2048 | Rollout收集步数（避免OOM） |
+| `mini_batch_size` | 64 | 更新时的切片大小 |
 | `n_epochs` | 5 | 每次收集后的更新轮数 |
-| `total_timesteps_per_window` | 200000 | 每窗口总训练步数 |
-| `n_rollout_steps` | 4096 | 每次收集的轨迹长度 |
+| `total_timesteps_per_window` | 100000 | 每窗口总训练步数 |
+| `n_rollout_steps` | 2048 | 每次收集的轨迹长度 |
 | `reward_scale` | 100.0 | **关键！**收益率放大倍数 |
 
 ## 📊 异构特征融合 (40维)
@@ -249,14 +249,22 @@ python main_ppo.py --preprocessed-data processed_data.pkl --batch-size 1024
 #### 超参数调整（训练更稳定、收敛更快）
 | 参数 | 旧值 | 新值 | 说明 |
 |------|------|------|------|
-| `batch_size` | 2048 | **4096** | 适中平衡效率与稳定性 |
-| `mini_batch_size` | 64 | **128** | 增大使梯度估计更稳定 |
+| `batch_size` | 2048 | **2048** | 保持2048防止OOM（4096会导致31GB显存不足） |
+| `mini_batch_size` | 64 | **64** | 保持64防止OOM |
 | `n_epochs` | 10 | **5** | 减小防止过拟合训练数据 |
-| `total_timesteps_per_window` | 100k | **200k** | 约100次更新，提高收敛 |
-| `n_rollout_steps` | 2048 | **4096** | 匹配batch_size |
-| `eval_interval` | 2048 | **8192** | 每2轮评估一次 |
+| `total_timesteps_per_window` | 100k | **100k** | 约50次更新 |
+| `n_rollout_steps` | 2048 | **2048** | 与batch_size匹配 |
+| `eval_interval` | 2048 | **4096** | 每2轮评估一次 |
 | `early_stop_patience` | 5 | **10** | 允许更多探索 |
 | `min_sharpe_improvement` | 0.01 | **0.005** | 更容易触发早停 |
+
+#### OOM修复（2025-02-14）
+- **问题**：`batch_size=4096` 时单个batch需要 **~6GB+显存**（4096×471×20×38×4 bytes），加上Transformer激活值导致31GB显存不足
+- **解决**：
+  1. 减小 `batch_size` 2048（原4096）
+  2. 减小 `mini_batch_size` 64（原128）
+  3. 添加 `torch.cuda.empty_cache()` 在每次更新后和每个epoch后
+  4. 添加显式 `del` 删除不需要的tensor
 
 #### TensorBoard增强
 - **新增指标**：`Train/Reward` - 每回合平均奖励

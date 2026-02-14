@@ -279,8 +279,9 @@ class PPOTrainer:
             # 3. PPO 更新
             loss_info = agent.update(buffer, advantages, returns)
             
-            # 清空 buffer
+            # 清空 buffer 并释放显存
             buffer.clear()
+            torch.cuda.empty_cache()  # 释放未使用的显存
             
             # 记录训练指标
             avg_reward = np.mean(episode_info['rewards'])
