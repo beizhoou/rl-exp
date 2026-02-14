@@ -154,7 +154,7 @@ def run_experiment(exp_name, exp_config, args):
         "--preprocessed-data", args.data_path,
         "--device", args.device,
         "--total-timesteps", str(args.timesteps),
-        "--n-windows", str(args.n_windows),
+        "--max-windows", str(args.n_windows),
     ]
     
     log_file = f"{exp_dir}/train.log"

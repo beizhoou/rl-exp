@@ -84,6 +84,8 @@ def main():
                        help='训练后运行基准对比')
     parser.add_argument('--benchmark-only', action='store_true',
                        help='仅运行基准对比')
+    parser.add_argument('--max-windows', type=int, default=None,
+                       help='最大训练窗口数（用于快速实验）')
     
     args = parser.parse_args()
     
@@ -96,6 +98,8 @@ def main():
     if args.lr:
         ppo_cfg.lr = args.lr
         ppo_cfg.critic_lr = args.lr
+    if args.max_windows:
+        train_cfg.max_windows = args.max_windows
     
     # 打印配置
     print_config()

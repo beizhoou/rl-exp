@@ -371,6 +371,11 @@ class PPOTrainer:
                        self.data.test_window_months)
         n_windows = max(0, (len(self.months) - total_months) // self.data.rolling_step_months + 1)
         
+        # 应用最大窗口数限制（用于快速实验）
+        if hasattr(self.config, 'max_windows') and self.config.max_windows:
+            n_windows = min(n_windows, self.config.max_windows)
+            print(f"⚡ Quick mode: limited to {n_windows} windows (max_windows={self.config.max_windows})")
+        
         print(f"Total windows: {n_windows}")
         
         all_test_results = []
